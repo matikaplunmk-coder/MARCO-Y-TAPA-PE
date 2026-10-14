@@ -102,8 +102,8 @@ export default function MetricsPanel({ analysis: a, params }: Props) {
         <Card title="Curva de enfriamiento · nervadura crítica" className="xl:col-span-3">
           <CoolingChart cooling={cooling} params={params} />
           <div className="mt-1 flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-300">
-            <span>Núcleo &lt; 50 °C en <b className="text-emerald-400">{isFinite(cooling.timeToCore50S) ? `${(cooling.timeToCore50S / 60).toFixed(1)} min` : '—'}</b></span>
-            <span>Salida programada: núcleo <b>{cooling.coreAtDwell.toFixed(0)} °C</b> / piel <b>{cooling.surfaceAtDwell.toFixed(0)} °C</b></span>
+            <span>Núcleo ≤ {cooling.targetC} °C en <b className="text-emerald-400">{isFinite(cooling.timeToTargetS) ? `${(cooling.timeToTargetS / 60).toFixed(1)} min` : 'no alcanzado'}</b></span>
+            <span>Salida: núcleo <b>{cooling.coreAtDwell.toFixed(0)} °C</b> / piel <b>{cooling.surfaceAtDwell.toFixed(0)} °C</b></span>
           </div>
         </Card>
         <Card title="Capacidad por estación (teórica, pz/h)" className="xl:col-span-2">
@@ -145,7 +145,8 @@ export default function MetricsPanel({ analysis: a, params }: Props) {
           <Row k="Coef. de seguridad" v={mech.safetyFactor.toFixed(2)} ok={mech.safetyFactor >= 1.15} />
         </Card>
         <Card title="Proceso y calidad">
-          <Row k="Tonelaje requerido" v={`${process.requiredTon.toFixed(0)} t`} />
+          <Row k="Presión específica" v={`${process.pressureMPa.toFixed(1)} MPa`} ok={process.pressureMPa >= 15} />
+          <Row k="Tonelaje requerido (llenado)" v={`${process.requiredTon.toFixed(0)} t`} />
           <Row k="Relación de llenado" v={`${(process.fillRatio * 100).toFixed(0)} %`} ok={process.fillRatio >= 1} />
           <Row k="Contracción de moldeo" v={`${process.shrinkagePct.toFixed(2)} %`} />
           <Row k="Alabeo previsto" v={`${process.warpMmPerM.toFixed(2)} mm/m`} ok={process.warpMmPerM <= 2} />
@@ -156,12 +157,13 @@ export default function MetricsPanel({ analysis: a, params }: Props) {
         </Card>
         <Card title="Tiempos de ciclo">
           <Row k="Carga (mesa lanzadera)" v={`${a.times.loadS} s`} />
-          <Row k="Prensado + enroscado" v={`${a.times.pressS} s`} />
+          <Row k="Prensado puro" v={`${a.times.pressPureS} s`} />
+          <Row k="Colocación de pasadores" v={`${a.times.pinS} s`} />
           <Row k="Apertura y salida" v={`${a.times.openS} s`} />
           <Row k="Grúa (×2)" v={`${a.times.craneS * 2} s`} />
           <Row k="Batea" v={`${(a.times.coolS / 60).toFixed(0)} min`} />
           <Row k="Desmoldeo" v={`${a.times.demoldS} s`} />
-          <Row k="Masa del extrusor" v={`${a.times.slugS.toFixed(0)} s`} />
+          <Row k="Llenado del acumulador" v={`${fmtMinSec(a.times.slugS)} min (${process.slugKg.toFixed(1)} kg)`} />
           <Row k="Ciclo completo del molde" v={`${((a.times.loadS + a.times.pressS + a.times.openS + 2 * a.times.craneS + a.times.coolS + a.times.demoldS + a.times.returnS) / 60).toFixed(1)} min`} />
         </Card>
       </div>

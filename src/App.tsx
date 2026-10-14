@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useDeferredValue, useMemo, useState } from 'react';
 import { Factory } from 'lucide-react';
 import ControlPanel from './components/ControlPanel';
 import MetricsPanel from './components/MetricsPanel';
@@ -9,7 +9,9 @@ import type { ProcessParams } from './types/simulation';
 
 export default function App() {
   const [params, setParams] = useState<ProcessParams>(DEFAULT_PARAMS);
-  const analysis = useMemo(() => analyze(params), [params]);
+  // El motor trabaja con una copia diferida: los sliders responden al instante y la animación no se congela
+  const deferred = useDeferredValue(params);
+  const analysis = useMemo(() => analyze(deferred), [deferred]);
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100">
@@ -27,12 +29,16 @@ export default function App() {
           <ControlPanel
             params={params}
             onChange={setParams}
-            requiredMin={analysis.cooling.timeToCore50S / 60}
+            requiredMin={analysis.cooling.timeToTargetS / 60}
+            slugKg={analysis.process.slugKg}
+            slugS={analysis.times.slugS}
+            pressureMPa={analysis.process.pressureMPa}
+            computing={deferred !== params}
           />
         </aside>
         <div className="min-w-0 space-y-4">
-          <PlantCanvas analysis={analysis} params={params} />
-          <MetricsPanel analysis={analysis} params={params} />
+          <PlantCanvas analysis={analysis} params={deferred} />
+          <MetricsPanel analysis={analysis} params={deferred} />
         </div>
       </main>
     </div>

@@ -1,9 +1,9 @@
 import type { Alert, Analysis, Bottleneck, BottleneckId, ProcessParams, StageTimes } from '../types/simulation';
 import { PARTS } from './parts';
 import { evaluateEN124 } from './mechanicalPhysics';
-import { evaluateProcess, slugMassKg } from './processModel';
+import { evaluateProcess, MIN_PRESSURE_MPA, slugMassKg } from './processModel';
 import { runDES } from './simulationEngine';
-import { simulateCooling } from './thermalPhysics';
+import { applyDwell, SEARCH_HORIZON_S, simulateCooling } from './thermalPhysics';
 
 export const AVAILABILITY = 0.92; // paradas planificadas, cambios de molde, mantenimiento
 export const SHIFT_H = 8;
@@ -11,14 +11,16 @@ const LOAD_S = 25; // mesa lanzadera: sale, recibe masa, reingresa
 const OPEN_S = 12; // apertura de prensa y salida del molde trabado
 const RETURN_S = 40; // retorno del molde vacío a la prensa
 
-export function stageTimes(p: ProcessParams): StageTimes {
+export function stageTimes(p: ProcessParams, coolS: number): StageTimes {
   const part = PARTS[p.partId];
   return {
     loadS: LOAD_S,
-    pressS: p.pressTimeS,
+    pressS: p.pressTimeS + p.pinS,
+    pressPureS: p.pressTimeS,
+    pinS: p.pinS,
     openS: OPEN_S,
     craneS: p.craneMoveS,
-    coolS: p.bathDwellMin * 60,
+    coolS,
     demoldS: p.demoldS,
     returnS: RETURN_S,
     slugS: (slugMassKg(part) / p.extruderKgH) * 3600,
@@ -50,14 +52,18 @@ function findBottleneck(p: ProcessParams, t: StageTimes): Bottleneck {
 
 export function analyze(p: ProcessParams): Analysis {
   const part = PARTS[p.partId];
-  const times = stageTimes(p);
+  const base = stageTimes(p, 0);
 
-  const cooling = simulateCooling(p, {
-    pressS: times.pressS,
-    openS: times.openS,
-    craneS: times.craneS,
-    dwellS: times.coolS,
-  });
+  // Perfil térmico completo; el tiempo de salida depende del modo de permanencia
+  const curve = simulateCooling(p, { pressS: base.pressS, openS: base.openS, craneS: base.craneS }, p.targetCoreC);
+  const dwellS =
+    p.dwellMode === 'temperature'
+      ? isFinite(curve.timeToTargetS)
+        ? Math.ceil(curve.timeToTargetS)
+        : SEARCH_HORIZON_S
+      : Math.round(p.bathDwellMin * 60);
+  const cooling = applyDwell(curve, dwellS);
+  const times = stageTimes(p, dwellS);
 
   const process = evaluateProcess(p, part, cooling.coreAtDwell, cooling.surfaceAtDwell);
   const mech = evaluateEN124({
@@ -111,7 +117,7 @@ function buildAlerts(p: ProcessParams, a: AlertCtx): Alert[] {
   const out: Alert[] = [];
   const add = (severity: Alert['severity'], id: string, title: string, detail: string) =>
     out.push({ id, severity, title, detail });
-  const reqMin = a.cooling.timeToCore50S / 60;
+  const reqMin = a.cooling.timeToTargetS / 60;
   const fmt = (x: number, d = 1) => x.toFixed(d);
 
   // Prensa
@@ -125,25 +131,28 @@ function buildAlerts(p: ProcessParams, a: AlertCtx): Alert[] {
     add('info', 'ton-high', 'Prensa sobredimensionada',
       `Se usa ${fmt(100 / a.process.fillRatio, 0)} % de la fuerza disponible; exceso de presión → rebaba excesiva y desgaste del molde.`);
 
-  if (p.pressTimeS < 90)
-    add('warn', 'ptime', 'Permanencia en prensa corta',
-      'Por debajo de 90 s la piel no consolida y no hay tiempo seguro para enroscar los pasadores bajo presión nominal.');
-  else if (p.pressTimeS > 120)
-    add('info', 'ptime', 'Permanencia en prensa larga', 'Sobre 120 s la prensa pierde productividad sin ganancia de calidad.');
+  if (a.process.pressureMPa < MIN_PRESSURE_MPA)
+    add('warn', 'pressure', 'Presión insuficiente para copiado de matriz',
+      `Presión específica ${fmt(a.process.pressureMPa)} MPa < ${MIN_PRESSURE_MPA} MPa (${p.pressTon} t sobre ${fmt(a.part.projectedAreaM2, 2)} m²). Se necesitan ≈ ${fmt((MIN_PRESSURE_MPA * a.part.projectedAreaM2 * 1e6) / 9806.65, 0)} t.`);
+  if (p.pressTimeS < 30)
+    add('warn', 'ptime', 'Prensado puro corto', 'Con menos de 30 s la piel no consolida bajo presión antes de colocar los pasadores.');
 
-  // Enfriamiento
-  if (!isFinite(a.cooling.timeToCore50S)) {
-    add('critical', 'cool', 'El núcleo no baja de 50 °C',
-      'Con este espesor y temperatura de agua el núcleo no se enfría dentro del horizonte simulado.');
-  } else if (a.times.coolS < a.cooling.timeToCore50S * 0.8) {
-    add('critical', 'cool', 'Tiempo en batea insuficiente: riesgo de alabeo y rechupes',
-      `Se programan ${fmt(a.times.coolS / 60, 0)} min, pero el núcleo necesita ≈ ${fmt(reqMin)} min para bajar de 50 °C. Saldrá a ${fmt(a.cooling.coreAtDwell, 0)} °C.`);
-  } else if (a.times.coolS < a.cooling.timeToCore50S) {
-    add('warn', 'cool', 'Tiempo en batea ajustado',
-      `El núcleo requiere ≈ ${fmt(reqMin)} min y se programan ${fmt(a.times.coolS / 60, 0)} min (núcleo ${fmt(a.cooling.coreAtDwell, 0)} °C).`);
-  } else if (a.times.coolS > a.cooling.timeToCore50S * 1.3) {
-    add('info', 'cool', 'Sobre-enfriamiento',
-      `Permanencia ${fmt(a.times.coolS / 60, 0)} min vs. ${fmt(reqMin)} min necesarios: se desperdicia capacidad de batea.`);
+  // Enfriamiento / batea
+  const tgt = a.cooling.targetC;
+  if (!isFinite(a.cooling.timeToTargetS)) {
+    add('critical', 'cool', `El núcleo no alcanza ${tgt} °C`,
+      `Con ${p.ribThkMm} mm de espesor y agua a ${p.bathTempC} °C el núcleo no baja de ${tgt} °C en ${SEARCH_HORIZON_S / 60} min. Bajar la temperatura del agua, subir el objetivo o reducir el espesor.`);
+  } else if (p.dwellMode === 'fixed') {
+    if (a.cooling.coreAtDwell > tgt) {
+      add('critical', 'cool', 'Riesgo crítico de alabeo y deformación post-desmoldeo',
+        `Se extrae a los ${fmt(a.times.coolS / 60, 0)} min con el núcleo a ${fmt(a.cooling.coreAtDwell, 0)} °C (objetivo ${tgt} °C, se necesitan ≈ ${fmt(reqMin)} min).`);
+    } else if (a.times.coolS > a.cooling.timeToTargetS * 1.3) {
+      add('info', 'cool', 'Sobre-enfriamiento',
+        `Permanencia ${fmt(a.times.coolS / 60, 0)} min vs. ${fmt(reqMin)} min necesarios: se desperdicia capacidad de batea.`);
+    }
+  } else {
+    add('info', 'cool', 'Batea gobernada por temperatura',
+      `El molde sale cuando el núcleo alcanza ${tgt} °C: ${fmt(reqMin)} min en batea.`);
   }
   if (p.bathTempC > 30) add('warn', 'bath', 'Agua de batea caliente', 'Sobre 30 °C el gradiente térmico cae y el enfriamiento se alarga; revisar el chiller.');
   if (a.process.warpMmPerM > 4) add('critical', 'warp', 'Alabeo previsto elevado', `≈ ${fmt(a.process.warpMmPerM)} mm/m por contracción diferencial núcleo-superficie.`);

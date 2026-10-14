@@ -116,14 +116,15 @@ export default function PlantCanvas({ analysis, params }: Props) {
   const crane = craneStateAt(des.craneSegments, t, params.bathSlots);
 
   // --- Estado de la prensa ---
-  const pressMold = states.find((s) => s.seg && ['LOADING', 'PRESSING', 'OPENING', 'WAIT_CRANE_IN'].includes(s.seg.stage));
+  const pressMold = states.find((s) => s.seg && ['LOADING', 'PRESSING', 'PINNING', 'OPENING', 'WAIT_CRANE_IN'].includes(s.seg.stage));
   const craneInMold = states.find((s) => s.seg?.stage === 'CRANE_IN' && crane.carrying !== s.id);
   const stage = pressMold?.seg?.stage;
   let openness = 1;
   if (stage === 'PRESSING') {
     const p = pressMold!.progress;
-    openness = p < 0.08 ? 1 - p / 0.08 : 0;
-  } else if (stage === 'OPENING') openness = pressMold!.progress;
+    openness = p < 0.15 ? 1 - p / 0.15 : 0;
+  } else if (stage === 'PINNING') openness = 0;
+  else if (stage === 'OPENING') openness = pressMold!.progress;
   let shuttle = 0;
   let slugFalling = 0; // 0..1
   if (stage === 'LOADING') {
@@ -133,7 +134,7 @@ export default function PlantCanvas({ analysis, params }: Props) {
   }
   const platenBottom = BED_Y - 2 * MOLD_H - 4;
   const platenY = platenBottom - openness * 95;
-  const forceOn = stage === 'PRESSING' && pressMold!.progress > 0.08;
+  const forceOn = stage === 'PINNING' || (stage === 'PRESSING' && pressMold!.progress > 0.15);
   const lockedMold = stage && stage !== 'LOADING';
   const sel = selected !== null ? states[selected] : undefined;
 

@@ -10,7 +10,7 @@ export default function CoolingChart({ cooling, params }: Props) {
   const W = 620;
   const H = 280;
   const m = { l: 44, r: 14, t: 14, b: 36 };
-  const tMax = Math.max(cooling.tBathIn + cooling.dwellS * 1.25, cooling.tBathIn + (isFinite(cooling.timeToCore50S) ? cooling.timeToCore50S * 1.2 : 0), 1800);
+  const tMax = Math.max(cooling.tBathIn + cooling.dwellS * 1.25, cooling.tBathIn + (isFinite(cooling.timeToTargetS) ? cooling.timeToTargetS * 1.2 : 0), 1800);
   const T0 = 0;
   const T1 = Math.ceil((params.meltTempC + 5) / 20) * 20;
   const x = (s: number) => m.l + (s / tMax) * (W - m.l - m.r);
@@ -29,7 +29,8 @@ export default function CoolingChart({ cooling, params }: Props) {
   const yTicks: number[] = [];
   for (let T = 0; T <= T1; T += 20) yTicks.push(T);
   const exitS = cooling.tBathIn + cooling.dwellS;
-  const t50 = isFinite(cooling.timeToCore50S) ? cooling.tBathIn + cooling.timeToCore50S : null;
+  const tTarget = isFinite(cooling.timeToTargetS) ? cooling.tBathIn + cooling.timeToTargetS : null;
+  const tgt = cooling.targetC;
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
@@ -52,11 +53,11 @@ export default function CoolingChart({ cooling, params }: Props) {
       <rect x={x(0)} y={m.t} width={x(cooling.tPressEnd) - x(0)} height={H - m.t - m.b} fill="#f97316" opacity={0.07} />
       <rect x={x(cooling.tBathIn)} y={m.t} width={x(Math.min(exitS, tMax)) - x(cooling.tBathIn)} height={H - m.t - m.b} fill="#0ea5e9" opacity={0.09} />
       <text x={x(cooling.tPressEnd / 2)} y={m.t + 10} fontSize={9} fill="#fb923c" textAnchor="middle">prensa</text>
-      <text x={(x(cooling.tBathIn) + x(Math.min(exitS, tMax))) / 2} y={m.t + 10} fontSize={9} fill="#38bdf8" textAnchor="middle">batea (permanencia programada)</text>
+      <text x={(x(cooling.tBathIn) + x(Math.min(exitS, tMax))) / 2} y={m.t + 10} fontSize={9} fill="#38bdf8" textAnchor="middle">batea (permanencia)</text>
 
       {/* umbral 50 °C y agua */}
-      <line x1={m.l} x2={W - m.r} y1={y(50)} y2={y(50)} stroke="#22c55e" strokeDasharray="5 4" />
-      <text x={m.l + 4} y={y(50) - 3} fontSize={9} fill="#4ade80">50 °C (límite de extracción)</text>
+      <line x1={m.l} x2={W - m.r} y1={y(tgt)} y2={y(tgt)} stroke="#22c55e" strokeDasharray="5 4" />
+      <text x={m.l + 4} y={y(tgt) - 3} fontSize={9} fill="#4ade80">{tgt} °C (objetivo de extracción)</text>
       <line x1={x(cooling.tBathIn)} x2={W - m.r} y1={y(params.bathTempC)} y2={y(params.bathTempC)} stroke="#38bdf8" strokeDasharray="2 3" opacity={0.7} />
       <text x={W - m.r - 2} y={y(params.bathTempC) + 11} fontSize={9} fill="#7dd3fc" textAnchor="end">agua {params.bathTempC} °C</text>
 
@@ -69,11 +70,11 @@ export default function CoolingChart({ cooling, params }: Props) {
       <text x={x(exitS) + 6} y={y(cooling.coreAtDwell) - 6} fontSize={10} fill="#fecaca" fontWeight={600}>
         salida: {cooling.coreAtDwell.toFixed(0)} °C
       </text>
-      {t50 !== null && t50 <= tMax && (
+      {tTarget !== null && tTarget <= tMax && (
         <>
-          <line x1={x(t50)} x2={x(t50)} y1={y(50)} y2={H - m.b} stroke="#22c55e" strokeDasharray="2 3" />
-          <circle cx={x(t50)} cy={y(50)} r={3.5} fill="#22c55e" />
-          <text x={x(t50) + 5} y={H - m.b - 5} fontSize={9} fill="#4ade80">núcleo &lt; 50 °C</text>
+          <line x1={x(tTarget)} x2={x(tTarget)} y1={y(tgt)} y2={H - m.b} stroke="#22c55e" strokeDasharray="2 3" />
+          <circle cx={x(tTarget)} cy={y(tgt)} r={3.5} fill="#22c55e" />
+          <text x={x(tTarget) + 5} y={H - m.b - 5} fontSize={9} fill="#4ade80">núcleo ≤ {tgt} °C</text>
         </>
       )}
 

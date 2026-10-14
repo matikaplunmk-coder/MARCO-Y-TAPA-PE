@@ -16,6 +16,13 @@ export function requiredTonnage(p: ProcessParams, part: PartSpec): number {
   return (requiredCavityPressureMPa(p) * part.projectedAreaM2 * 1e6) / KGF_PER_TON;
 }
 
+export const MIN_PRESSURE_MPA = 15;
+
+/** Presión específica (MPa) = fuerza de cierre / área proyectada */
+export function specificPressureMPa(pressTon: number, part: PartSpec): number {
+  return (pressTon * KGF_PER_TON) / (part.projectedAreaM2 * 1e6);
+}
+
 export function slugMassKg(part: PartSpec): number {
   return part.massKg * (1 + SLUG_OVERWEIGHT);
 }
@@ -28,6 +35,7 @@ export function evaluateProcess(
 ): ProcessCheck {
   const requiredTon = requiredTonnage(p, part);
   const fillRatio = p.pressTon / requiredTon;
+  const pressureMPa = specificPressureMPa(p.pressTon, part);
   const uvIndex = Math.min(1.2, p.carbonPct / 2.0);
   const shrinkagePct = moldShrinkagePct(p.glassPct, coreAtExit);
   const warp = warpIndex(p.glassPct, coreAtExit, surfAtExit);
@@ -44,12 +52,14 @@ export function evaluateProcess(
   q *= 1 - 0.35 * sinkRisk;
   if (uvIndex < 1) q *= 1 - 0.1 * (1 - uvIndex);
   if (p.meltTempC > 210) q *= 0.85;
-  if (p.pressTimeS < 90) q *= 0.93;
+  if (p.pressTimeS < 30) q *= 0.93;
+  if (pressureMPa < MIN_PRESSURE_MPA) q *= Math.max(0.5, pressureMPa / MIN_PRESSURE_MPA);
 
   return {
     requiredTon,
     fillRatio,
     slugKg: slugMassKg(part),
+    pressureMPa,
     uvIndex,
     shrinkagePct,
     warpMmPerM: warp,

@@ -104,12 +104,16 @@ export function runDES(p: ProcessParams, st: StageTimes, cfg: DESConfig): DESRes
         progress = true;
         schedule(st.loadS, () => {
           enter(m, 'PRESSING', 0);
-          schedule(st.pressS, () => {
+          schedule(st.pressPureS, () => {
+            // La prensa sostiene la presión nominal mientras se colocan los pasadores roscados
+            enter(m, 'PINNING', st.pressPureS);
+            schedule(st.pinS, () => {
             enter(m, 'OPENING', st.pressS);
             schedule(st.openS, () => {
               enter(m, 'WAIT_CRANE_IN', st.pressS + st.openS);
               waitCraneIn = m;
               dispatch();
+            });
             });
           });
         });
@@ -214,7 +218,7 @@ export function runDES(p: ProcessParams, st: StageTimes, cfg: DESConfig): DESRes
     return sum;
   };
 
-  const pressBusy = busy(['LOADING', 'PRESSING', 'OPENING']);
+  const pressBusy = busy(['LOADING', 'PRESSING', 'PINNING', 'OPENING']);
   const pressBlocked = busy(['WAIT_CRANE_IN']);
   const util = {
     press: pressBusy / win,

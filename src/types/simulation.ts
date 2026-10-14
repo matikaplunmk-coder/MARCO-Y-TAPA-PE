@@ -24,6 +24,8 @@ export interface PartSpec {
   defaultRibThk: number;
 }
 
+export type DwellMode = 'temperature' | 'fixed';
+
 export interface ProcessParams {
   partId: PartId;
   // Formulación
@@ -33,14 +35,17 @@ export interface ProcessParams {
   ribThkMm: number; // espesor crítico en nervaduras
   // Máquina
   pressTon: number;
-  pressTimeS: number; // permanencia en prensa (incluye enroscado de pasadores)
+  pressTimeS: number; // tiempo de prensado puro
+  pinS: number; // colocación de pasadores roscados (ocupa la estación de prensa)
   moldCount: number; // flota de moldes rotativos
   bathTempC: number;
-  bathDwellMin: number; // permanencia programada en batea
-  bathSlots: number; // posiciones disponibles en la batea
+  bathSlots: number; // capacidad del tanque: posiciones de inmersión simultánea
+  dwellMode: DwellMode;
+  targetCoreC: number; // temperatura objetivo de núcleo para extraer de la batea
+  bathDwellMin: number; // permanencia manual (modo tiempo fijo)
   extruderKgH: number; // caudal del extrusor
   craneMoveS: number; // duración de un traslado de grúa
-  demoldS: number; // desenroscado + apertura + desmoldeo por molde
+  demoldS: number; // desapriete + apertura + desmoldeo por molde
   demoldStations: number;
 }
 
@@ -48,6 +53,7 @@ export type Stage =
   | 'WAIT_PRESS'
   | 'LOADING'
   | 'PRESSING'
+  | 'PINNING'
   | 'OPENING'
   | 'WAIT_CRANE_IN'
   | 'CRANE_IN'
@@ -81,7 +87,10 @@ export interface CraneSegment {
 
 export interface StageTimes {
   loadS: number;
+  /** Ocupación de la prensa en la etapa de prensado = prensado puro + pasadores */
   pressS: number;
+  pressPureS: number;
+  pinS: number;
   openS: number;
   craneS: number;
   coolS: number;
@@ -126,8 +135,10 @@ export interface CoolingCurve {
   surface: number[];
   tBathIn: number;
   tPressEnd: number;
-  /** Tiempo (desde entrada en batea) para que el núcleo baje de 50 °C (s); Infinity si no se alcanza */
-  timeToCore50S: number;
+  /** Temperatura objetivo de núcleo para la extracción (°C) */
+  targetC: number;
+  /** Tiempo (desde entrada en batea) para que el núcleo baje del objetivo (s); Infinity si no se alcanza */
+  timeToTargetS: number;
   coreAtDwell: number;
   surfaceAtDwell: number;
   dwellS: number;
@@ -161,6 +172,7 @@ export interface ProcessCheck {
   requiredTon: number;
   fillRatio: number;
   slugKg: number;
+  pressureMPa: number; // presión específica sobre el área proyectada
   uvIndex: number;
   shrinkagePct: number;
   warpMmPerM: number;

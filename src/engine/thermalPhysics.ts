@@ -106,34 +106,35 @@ export interface CoolingTimes {
   pressS: number;
   openS: number;
   craneS: number;
-  dwellS: number;
 }
+
+export const SEARCH_HORIZON_S = 120 * 60;
 
 /**
  * Curva de enfriamiento núcleo/superficie de la nervadura crítica.
  * Fases: prensa (molde a 60 °C) → apertura y traslado en aire → batea con agua recirculada.
- * El eje de tiempo comienza al iniciar el prensado.
+ * Condición inicial: perfil uniforme a la temperatura de masa fundida (T_0).
+ * El eje de tiempo comienza al iniciar el prensado. Se simula hasta SEARCH_HORIZON_S tras entrar en batea,
+ * de modo que el tiempo para alcanzar la temperatura objetivo se obtiene de la propia curva.
  */
-export function simulateCooling(p: ProcessParams, times: CoolingTimes): CoolingCurve {
+export function simulateCooling(p: ProcessParams, times: CoolingTimes, targetC: number): CoolingCurve {
   const L = p.ribThkMm / 1000 / 2; // media espesor
   const dz = L / (NODES - 1);
   const rho = density(p.glassPct);
   const k = conductivity(p.glassPct);
-  const T = new Float64Array(NODES).fill(p.meltTempC - 4); // ligera caída durante la carga
+  const T = new Float64Array(NODES).fill(p.meltTempC);
   const wf = p.glassPct / 100;
 
   const tPressEnd = times.pressS;
   const tBathIn = times.pressS + times.openS + times.craneS;
-  const tEnd = tBathIn + Math.max(45 * 60, times.dwellS + 600);
+  const tEnd = tBathIn + SEARCH_HORIZON_S;
   const dt = 1;
   const sample = 5;
 
   const t: number[] = [];
   const core: number[] = [];
   const surface: number[] = [];
-  let timeToCore50 = Infinity;
-  let coreAtDwell = NaN;
-  let surfAtDwell = NaN;
+  let timeToTarget = Infinity;
 
   for (let s = 0; s <= tEnd; s += dt) {
     if (s % sample === 0) {
@@ -141,11 +142,7 @@ export function simulateCooling(p: ProcessParams, times: CoolingTimes): CoolingC
       core.push(T[0]);
       surface.push(T[NODES - 1]);
     }
-    if (timeToCore50 === Infinity && s >= tBathIn && T[0] < 50) timeToCore50 = s - tBathIn;
-    if (Number.isNaN(coreAtDwell) && s >= tBathIn + times.dwellS) {
-      coreAtDwell = T[0];
-      surfAtDwell = T[NODES - 1];
-    }
+    if (timeToTarget === Infinity && s >= tBathIn && T[0] <= targetC) timeToTarget = s - tBathIn;
     let h = H_BATH;
     let tInf = p.bathTempC;
     if (s < tPressEnd) {
@@ -157,27 +154,38 @@ export function simulateCooling(p: ProcessParams, times: CoolingTimes): CoolingC
     }
     stepImplicit(T, wf, k, rho, dz, dt, h, tInf);
   }
-  if (Number.isNaN(coreAtDwell)) {
-    coreAtDwell = T[0];
-    surfAtDwell = T[NODES - 1];
-  }
+  return applyDwell(
+    {
+      t,
+      core,
+      surface,
+      tBathIn,
+      tPressEnd,
+      targetC,
+      timeToTargetS: timeToTarget,
+      coreAtDwell: NaN,
+      surfaceAtDwell: NaN,
+      dwellS: 0,
+    },
+    0,
+  );
+}
+
+/** Fija la permanencia en batea y evalúa temperaturas de núcleo/superficie en el instante de extracción */
+export function applyDwell(curve: CoolingCurve, dwellS: number): CoolingCurve {
+  const k = curve.tBathIn + dwellS;
   return {
-    t,
-    core,
-    surface,
-    tBathIn,
-    tPressEnd,
-    timeToCore50S: timeToCore50,
-    coreAtDwell,
-    surfaceAtDwell: surfAtDwell,
-    dwellS: times.dwellS,
+    ...curve,
+    dwellS,
+    coreAtDwell: sampleCurve(curve, k, 'core'),
+    surfaceAtDwell: sampleCurve(curve, k, 'surface'),
   };
 }
 
 /** Interpola la temperatura (núcleo o superficie) en el instante k de la curva */
-export function sampleCurve(curve: CoolingCurve, k: number, which: 'core' | 'surface' = 'core', meltC = 190): number {
+export function sampleCurve(curve: CoolingCurve, k: number, which: 'core' | 'surface' = 'core', meltC?: number): number {
   const arr = curve[which];
-  if (k <= 0) return meltC - 4;
+  if (k <= 0) return meltC ?? arr[0];
   const i = k / 5;
   const i0 = Math.min(arr.length - 1, Math.floor(i));
   const i1 = Math.min(arr.length - 1, i0 + 1);

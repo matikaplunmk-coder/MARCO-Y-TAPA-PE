@@ -37,7 +37,8 @@ export function tempColor(tC: number): string {
 export const STAGE_LABEL: Record<string, string> = {
   WAIT_PRESS: 'En cola para prensa',
   LOADING: 'Carga de masa (mesa lanzadera)',
-  PRESSING: 'Prensado + enroscado de pasadores',
+  PRESSING: 'Prensado a presión nominal',
+  PINNING: 'Colocación de pasadores roscados (bajo presión)',
   OPENING: 'Apertura de prensa',
   WAIT_CRANE_IN: 'Esperando grúa (prensa retenida)',
   CRANE_IN: 'Grúa → batea',
