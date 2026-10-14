@@ -14,7 +14,9 @@ npm run build      # typecheck + build de producción
 | Ruta | Contenido |
 | --- | --- |
 | `src/types/simulation.ts` | Interfaces: piezas, parámetros, segmentos DES, resultados, alertas |
-| `src/engine/parts.ts` | Catálogo (Brocal D400, Tapa C250, Rejilla, Registro) y valores por defecto |
+| `src/engine/parts.ts` | Presets de pieza y **valores de fábrica** de todos los parámetros |
+| `src/engine/paramSchema.ts` | Esquema de campos editables (rangos de slider y límites duros) |
+| `src/engine/presets.ts` | Exportar / importar presets JSON con validación |
 | `src/engine/thermalPhysics.ts` | Conducción 1D transitoria (implícito, Thomas) con calor de cristalización, Maxwell, contracción y alabeo |
 | `src/engine/mechanicalPhysics.ts` | Halpin-Tsai/Tsai-Pagano (regla de mezclas), placa nervada, ensayo EN 124 (flecha permanente y rotura) |
 | `src/engine/processModel.ts` | Tonelaje requerido, llenado, rechupes, UV, rendimiento de calidad |
@@ -35,3 +37,21 @@ npm run build      # typecheck + build de producción
   factores de reparto y fluencia **calibrados cualitativamente**: sirven para comparar formulaciones y geometrías,
   no sustituyen el ensayo normativo ni un análisis por elementos finitos.
 * **OEE** = disponibilidad fija (92 %) × rendimiento (ritmo real / capacidad de prensa) × calidad estimada.
+
+## Modo sandbox
+
+Todas las variables del proceso (≈ 110) viven en `ProcessParams` y se editan desde el panel (slider + campo numérico con
+límites duros; los campos de calibración están en bloques «Avanzado»). «Exportar preset JSON» descarga la
+configuración; «Cargar preset JSON» la valida (claves desconocidas ignoradas, números limitados a su rango, lo que falte
+toma el valor de fábrica). Solo quedan fijas la discretización numérica del modelo térmico (41 nodos, paso de 1 s),
+los pesos internos del índice de rechupes y las constantes de unidades.
+
+## Despliegue en Vercel
+
+`vercel.json` ya contiene la reescritura SPA. Vercel detecta Vite automáticamente
+(Build Command `npm run build`, Output Directory `dist`):
+
+1. Importar el repositorio en https://vercel.com/new (rama `claude/quirky-hamilton-5o5wmr` o `main` tras fusionar).
+2. Dejar los ajustes detectados y pulsar *Deploy*.
+
+O por CLI: `npm i -g vercel && vercel --prod`.

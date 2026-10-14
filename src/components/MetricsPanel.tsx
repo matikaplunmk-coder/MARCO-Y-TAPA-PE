@@ -1,6 +1,7 @@
 import { AlertTriangle, CheckCircle2, Info, OctagonAlert } from 'lucide-react';
 import type { Alert, Analysis, BottleneckId, ProcessParams } from '../types/simulation';
 import { fmtMinSec } from '../engine/format';
+import { classLabel } from '../engine/parts';
 import CoolingChart from './CoolingChart';
 import Gauge from './Gauge';
 
@@ -83,11 +84,11 @@ export default function MetricsPanel({ analysis: a, params }: Props) {
           label="Deformación permanente EN 124"
           value={mech.permanentDeflMm}
           min={0}
-          max={4}
+          max={Math.max(4, Math.ceil(params.maxResidualMm * 2))}
           unit="mm"
           decimals={2}
-          zones={[{ upTo: 1.4, color: '#22c55e' }, { upTo: 2.0, color: '#f59e0b' }, { upTo: 4, color: '#ef4444' }]}
-          note={`Límite ≤ 2,0 mm tras ${((2 / 3) * a.part.breakLoadKN).toFixed(1)} kN`}
+          zones={[{ upTo: params.maxResidualMm * 0.7, color: '#22c55e' }, { upTo: params.maxResidualMm, color: '#f59e0b' }, { upTo: 1e9, color: '#ef4444' }]}
+          note={`Límite ≤ ${params.maxResidualMm.toFixed(1)} mm tras ${((params.proofLoadPct / 100) * a.part.breakLoadKN).toFixed(1)} kN`}
         />
         <div className="flex flex-col justify-center rounded-lg bg-slate-800/70 p-3 text-center">
           <div className="text-[10px] uppercase tracking-wide text-slate-500">Cuello de botella detectado</div>
@@ -133,7 +134,7 @@ export default function MetricsPanel({ analysis: a, params }: Props) {
 
       {/* Calidad */}
       <div className="grid gap-3 md:grid-cols-3">
-        <Card title={`UNE-EN 124 · ${a.part.loadClass}`}>
+        <Card title={`UNE-EN 124 · ${classLabel(a.part)}`}>
           <Row k="Fracción vol. fibra" v={`${(mech.glassVolFrac * 100).toFixed(1)} %`} />
           <Row k="Módulo elástico E" v={`${(mech.modulusMPa / 1000).toFixed(2)} GPa`} />
           <Row k="Resistencia última" v={`${mech.tensileStrengthMPa.toFixed(0)} MPa`} />
@@ -162,7 +163,8 @@ export default function MetricsPanel({ analysis: a, params }: Props) {
           <Row k="Apertura y salida" v={`${a.times.openS} s`} />
           <Row k="Grúa (×2)" v={`${a.times.craneS * 2} s`} />
           <Row k="Batea" v={`${(a.times.coolS / 60).toFixed(0)} min`} />
-          <Row k="Desmoldeo" v={`${a.times.demoldS} s`} />
+          <Row k="Desapriete y retiro de tensores" v={`${a.times.unpinS} s`} />
+          <Row k="Desmoldeo y extracción" v={`${a.times.demoldOnlyS} s`} />
           <Row k="Llenado del acumulador" v={`${fmtMinSec(a.times.slugS)} min (${process.slugKg.toFixed(1)} kg)`} />
           <Row k="Ciclo completo del molde" v={`${((a.times.loadS + a.times.pressS + a.times.openS + 2 * a.times.craneS + a.times.coolS + a.times.demoldS + a.times.returnS) / 60).toFixed(1)} min`} />
         </Card>

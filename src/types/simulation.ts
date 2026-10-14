@@ -1,52 +1,152 @@
 // Tipos compartidos por el motor, los componentes y el dashboard.
 
-export type PartId = 'brocal_d400' | 'tapa_c250' | 'rejilla' | 'registro';
+export type PartId = 'brocal_d400' | 'tapa_c250' | 'rejilla' | 'registro' | 'custom';
+export type LoadClass = 'D400' | 'C250' | 'B125' | 'MANUAL';
+export type DwellMode = 'temperature' | 'fixed';
 
+/** Pieza derivada de los parámetros (solo lectura para el motor y la UI) */
 export interface PartSpec {
-  id: PartId;
   name: string;
   massKg: number;
-  /** Clase según UNE-EN 124 */
-  loadClass: 'D400' | 'C250' | 'B125';
-  /** Carga de rotura mínima exigida (kN) */
+  loadClass: LoadClass;
+  /** Carga de rotura exigida (kN) */
   breakLoadKN: number;
-  /** Diámetro de paso libre (mm) */
   openingMm: number;
-  /** Diámetro/lado exterior (mm) */
-  outerMm: number;
-  /** Área proyectada del molde incluida la zona de rebaba (m²) */
+  /** Área proyectada exterior total (m²) */
+  grossAreaM2: number;
+  /** Área proyectada efectiva = total × (1 − huecos) (m²) */
   projectedAreaM2: number;
-  /** Geometría equivalente del panel nervado (mm) */
+  voidFrac: number;
   plateThkMm: number;
   ribHeightMm: number;
   ribSpacingMm: number;
-  ribThkRange: [number, number];
-  defaultRibThk: number;
 }
 
-export type DwellMode = 'temperature' | 'fixed';
-
+/**
+ * TODAS las variables del sistema. No hay constantes físicas ni operativas fuera de este objeto
+ * (salvo la discretización numérica del modelo térmico y las unidades).
+ */
 export interface ProcessParams {
-  partId: PartId;
-  // Formulación
-  glassPct: number; // % en peso de fibra de vidrio
-  carbonPct: number; // % en peso de negro de humo
-  meltTempC: number; // temperatura de la masa fundida
-  ribThkMm: number; // espesor crítico en nervaduras
-  // Máquina
+  // ── Geometría y pieza ──────────────────────────────
+  partId: PartId; // solo etiqueta del preset de origen
+  massKg: number;
+  projectedAreaM2: number;
+  voidPct: number;
+  ribThkMm: number;
+  loadClass: LoadClass;
+  breakLoadKN: number;
+  maxResidualMm: number;
+  proofLoadPct: number; // % de la carga de rotura aplicado en el ensayo de flecha residual
+  openingMm: number;
+  plateThkMm: number;
+  ribHeightMm: number;
+  ribSpacingMm: number;
+  padRadiusMm: number;
+  // ── Formulación y propiedades ─────────────────────
+  glassPct: number;
+  carbonPct: number;
+  meltTempC: number;
+  eMatrixMPa: number;
+  eFiberGPa: number;
+  latentKJkg: number;
+  crystTempC: number;
+  crystWidthC: number;
+  crystFracPct: number;
+  kAuto: boolean;
+  kComposite: number;
+  kMatrix: number;
+  kFiber: number;
+  rhoFiber: number;
+  rhoMatrix: number;
+  cpMatrix: number;
+  cpFiber: number;
+  alphaMatrix: number; // ×1e-6 1/K
+  alphaFiber: number; // ×1e-6 1/K
+  fiberAspect: number;
+  poisson: number;
+  sigmaMatrixMPa: number;
+  strengthPerGlass: number; // MPa por % de fibra
+  glassOverloadPct: number; // % de fibra a partir del cual cae la resistencia
+  glassOverloadSlope: number; // MPa perdidos por % excedido
+  shrinkCrystPct: number;
+  shrinkDecay: number;
+  // ── Extrusor y acumulador ─────────────────────────
+  extruderKgH: number;
+  overweightPct: number;
+  // ── Prensa y moldeo ───────────────────────────────
   pressTon: number;
-  pressTimeS: number; // tiempo de prensado puro
-  pinS: number; // colocación de pasadores roscados (ocupa la estación de prensa)
-  moldCount: number; // flota de moldes rotativos
-  bathTempC: number;
-  bathSlots: number; // capacidad del tanque: posiciones de inmersión simultánea
-  dwellMode: DwellMode;
-  targetCoreC: number; // temperatura objetivo de núcleo para extraer de la batea
-  bathDwellMin: number; // permanencia manual (modo tiempo fijo)
-  extruderKgH: number; // caudal del extrusor
-  craneMoveS: number; // duración de un traslado de grúa
-  demoldS: number; // desapriete + apertura + desmoldeo por molde
+  pressTimeS: number;
+  minPressureMPa: number;
+  loadS: number;
+  openS: number;
+  pressBaseMPa: number;
+  pressPerGlassMPa: number;
+  pressPerMeltMPa: number;
+  pressRibExp: number;
+  moldTempC: number;
+  // ── Cinemática y operarios ────────────────────────
+  pinS: number;
+  unpinS: number;
+  craneMoveS: number;
+  demoldS: number;
+  returnS: number;
   demoldStations: number;
+  // ── Batea ─────────────────────────────────────────
+  bathTempC: number;
+  bathSlots: number;
+  moldCount: number;
+  dwellMode: DwellMode;
+  bathDwellMin: number;
+  targetCoreC: number;
+  hWater: number;
+  steelThkMm: number;
+  kSteel: number;
+  contactResBath: number; // ×1e-3 m²K/W
+  contactResPress: number; // ×1e-3 m²K/W
+  hAir: number;
+  ambientC: number;
+  searchHorizonMin: number;
+  // ── Mecánica (calibración) ────────────────────────
+  loadSpread: number;
+  supportClamp: number;
+  padFactor: number;
+  gridFactor: number;
+  yieldFrac: number;
+  creepBase: number;
+  creepGain: number;
+  // ── Planta / OEE ──────────────────────────────────
+  availabilityPct: number;
+  shiftH: number;
+  simHorizonH: number;
+  warmupH: number;
+  // ── Umbrales de alerta y calidad ──────────────────
+  glassMinRec: number;
+  glassMaxRec: number;
+  meltMin: number;
+  meltMax: number;
+  meltCritical: number;
+  carbonMin: number;
+  carbonMax: number;
+  carbonTargetPct: number; // contenido que da índice UV = 100 %
+  bathWarnC: number;
+  warpWarnMmM: number;
+  warpCritMmM: number;
+  sinkWarnPct: number;
+  safetyWarn: number;
+  craneUtilWarnPct: number;
+  pressBlockedWarnPct: number;
+  overPressRatio: number;
+  shortPressS: number;
+  qualityBasePct: number;
+  warpPenalty: number;
+  sinkPenalty: number;
+  uvPenalty: number;
+  meltPenalty: number;
+  lowPressPenaltyFloor: number;
+  nonConformFactor: number;
+  warpDiffWeight: number;
+  warpResidualWeight: number;
+  warpScale: number;
 }
 
 export type Stage =
@@ -95,6 +195,8 @@ export interface StageTimes {
   craneS: number;
   coolS: number;
   demoldS: number;
+  unpinS: number;
+  demoldOnlyS: number;
   returnS: number;
   slugS: number;
 }
@@ -180,8 +282,19 @@ export interface ProcessCheck {
   qualityYield: number; // 0..1
 }
 
+export interface Derived {
+  slugKg: number;
+  slugS: number;
+  pressureMPa: number;
+  effAreaM2: number;
+  kValue: number;
+  modulusGPa: number;
+  requiredMin: number;
+}
+
 export interface Analysis {
   part: PartSpec;
+  derived: Derived;
   times: StageTimes;
   cooling: CoolingCurve;
   mech: MechanicalResult;

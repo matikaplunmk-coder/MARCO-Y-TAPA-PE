@@ -26,15 +26,7 @@ export default function App() {
       </header>
       <main className="grid gap-4 p-4 lg:grid-cols-[320px_1fr]">
         <aside className="lg:max-h-[calc(100vh-90px)] lg:overflow-y-auto lg:pr-1">
-          <ControlPanel
-            params={params}
-            onChange={setParams}
-            requiredMin={analysis.cooling.timeToTargetS / 60}
-            slugKg={analysis.process.slugKg}
-            slugS={analysis.times.slugS}
-            pressureMPa={analysis.process.pressureMPa}
-            computing={deferred !== params}
-          />
+          <ControlPanel params={params} onChange={setParams} derived={analysis.derived} computing={deferred !== params} />
         </aside>
         <div className="min-w-0 space-y-4">
           <PlantCanvas analysis={analysis} params={deferred} />

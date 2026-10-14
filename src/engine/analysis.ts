@@ -1,29 +1,24 @@
 import type { Alert, Analysis, Bottleneck, BottleneckId, ProcessParams, StageTimes } from '../types/simulation';
-import { PARTS } from './parts';
-import { evaluateEN124 } from './mechanicalPhysics';
-import { evaluateProcess, MIN_PRESSURE_MPA, slugMassKg } from './processModel';
+import { classLabel, getPart } from './parts';
+import { compositeModulus, evaluateEN124 } from './mechanicalPhysics';
+import { evaluateProcess, slugMassKg, tonnageForPressure } from './processModel';
 import { runDES } from './simulationEngine';
-import { applyDwell, SEARCH_HORIZON_S, simulateCooling } from './thermalPhysics';
-
-export const AVAILABILITY = 0.92; // paradas planificadas, cambios de molde, mantenimiento
-export const SHIFT_H = 8;
-const LOAD_S = 25; // mesa lanzadera: sale, recibe masa, reingresa
-const OPEN_S = 12; // apertura de prensa y salida del molde trabado
-const RETURN_S = 40; // retorno del molde vacío a la prensa
+import { applyDwell, conductivity, simulateCooling } from './thermalPhysics';
 
 export function stageTimes(p: ProcessParams, coolS: number): StageTimes {
-  const part = PARTS[p.partId];
   return {
-    loadS: LOAD_S,
+    loadS: p.loadS,
     pressS: p.pressTimeS + p.pinS,
     pressPureS: p.pressTimeS,
     pinS: p.pinS,
-    openS: OPEN_S,
+    openS: p.openS,
     craneS: p.craneMoveS,
     coolS,
-    demoldS: p.demoldS,
-    returnS: RETURN_S,
-    slugS: (slugMassKg(part) / p.extruderKgH) * 3600,
+    demoldS: p.unpinS + p.demoldS,
+    unpinS: p.unpinS,
+    demoldOnlyS: p.demoldS,
+    returnS: p.returnS,
+    slugS: (slugMassKg(p) / p.extruderKgH) * 3600,
   };
 }
 
@@ -51,7 +46,7 @@ function findBottleneck(p: ProcessParams, t: StageTimes): Bottleneck {
 }
 
 export function analyze(p: ProcessParams): Analysis {
-  const part = PARTS[p.partId];
+  const part = getPart(p);
   const base = stageTimes(p, 0);
 
   // Perfil térmico completo; el tiempo de salida depende del modo de permanencia
@@ -60,44 +55,54 @@ export function analyze(p: ProcessParams): Analysis {
     p.dwellMode === 'temperature'
       ? isFinite(curve.timeToTargetS)
         ? Math.ceil(curve.timeToTargetS)
-        : SEARCH_HORIZON_S
+        : p.searchHorizonMin * 60
       : Math.round(p.bathDwellMin * 60);
   const cooling = applyDwell(curve, dwellS);
   const times = stageTimes(p, dwellS);
 
   const process = evaluateProcess(p, part, cooling.coreAtDwell, cooling.surfaceAtDwell);
   const mech = evaluateEN124({
+    p,
     part,
-    glassPct: p.glassPct,
-    carbonPct: p.carbonPct,
-    ribThkMm: p.ribThkMm,
     fillFactor: Math.min(1, process.fillRatio) ** 2,
     residualFactor: 1 - 0.1 * Math.min(1, process.warpMmPerM / 3) - 0.15 * process.sinkRisk,
   });
 
   const des = runDES(p, times, {
-    horizonS: 10 * 3600,
-    windowStartS: 2 * 3600,
+    horizonS: p.simHorizonH * 3600,
+    windowStartS: Math.min(p.warmupH, p.simHorizonH * 0.8) * 3600,
     kBathIn: cooling.tBathIn,
   });
   const bottleneck = findBottleneck(p, times);
 
   // OEE = disponibilidad × rendimiento (ritmo real / ritmo ideal de prensa) × calidad
   let quality = process.qualityYield;
-  if (!mech.passBreak || !mech.passDeflection) quality *= 0.5;
+  if (!mech.passBreak || !mech.passDeflection) quality *= p.nonConformFactor;
   const pressCapacity = bottleneck.capacities.Prensa;
   const performance = Math.min(1, des.piecesPerHour / pressCapacity);
+  const availability = p.availabilityPct / 100;
   const oee = {
-    availability: AVAILABILITY,
+    availability: availability,
     performance,
     quality,
-    oee: AVAILABILITY * performance * quality,
+    oee: availability * performance * quality,
   };
-  const piecesPerShift = des.piecesPerHour * SHIFT_H * AVAILABILITY;
+  const piecesPerShift = des.piecesPerHour * p.shiftH * availability;
   const goodPiecesPerShift = piecesPerShift * quality;
+
+  const derived = {
+    slugKg: process.slugKg,
+    slugS: times.slugS,
+    pressureMPa: process.pressureMPa,
+    effAreaM2: part.projectedAreaM2,
+    kValue: conductivity(p),
+    modulusGPa: compositeModulus(p).E / 1000,
+    requiredMin: curve.timeToTargetS / 60,
+  };
 
   return {
     part,
+    derived,
     times,
     cooling,
     mech,
@@ -123,25 +128,25 @@ function buildAlerts(p: ProcessParams, a: AlertCtx): Alert[] {
   // Prensa
   if (a.process.fillRatio < 0.85)
     add('critical', 'ton', 'Tonelaje insuficiente: llenado incompleto',
-      `Se requieren ≈ ${fmt(a.process.requiredTon, 0)} t para el área proyectada (${fmt(a.part.projectedAreaM2, 2)} m², Ø${a.part.outerMm} mm); hay ${p.pressTon} t. Nervaduras sin llenar y asiento cónico de 35° deficiente.`);
+      `Se requieren ≈ ${fmt(a.process.requiredTon, 0)} t para el área proyectada efectiva (${fmt(a.part.projectedAreaM2, 2)} m²); hay ${p.pressTon} t. Nervaduras sin llenar y asiento cónico de 35° deficiente.`);
   else if (a.process.fillRatio < 1)
     add('warn', 'ton', 'Tonelaje justo',
       `Margen negativo de ${fmt((1 - a.process.fillRatio) * 100, 0)} %: riesgo de falta de llenado en nervaduras. Necesarias ≈ ${fmt(a.process.requiredTon, 0)} t.`);
-  else if (a.process.fillRatio > 1.6)
+  else if (a.process.fillRatio > p.overPressRatio)
     add('info', 'ton-high', 'Prensa sobredimensionada',
       `Se usa ${fmt(100 / a.process.fillRatio, 0)} % de la fuerza disponible; exceso de presión → rebaba excesiva y desgaste del molde.`);
 
-  if (a.process.pressureMPa < MIN_PRESSURE_MPA)
+  if (a.process.pressureMPa < p.minPressureMPa)
     add('warn', 'pressure', 'Presión insuficiente para copiado de matriz',
-      `Presión específica ${fmt(a.process.pressureMPa)} MPa < ${MIN_PRESSURE_MPA} MPa (${p.pressTon} t sobre ${fmt(a.part.projectedAreaM2, 2)} m²). Se necesitan ≈ ${fmt((MIN_PRESSURE_MPA * a.part.projectedAreaM2 * 1e6) / 9806.65, 0)} t.`);
-  if (p.pressTimeS < 30)
-    add('warn', 'ptime', 'Prensado puro corto', 'Con menos de 30 s la piel no consolida bajo presión antes de colocar los pasadores.');
+      `Presión específica ${fmt(a.process.pressureMPa)} MPa < ${fmt(p.minPressureMPa)} MPa (${p.pressTon} t sobre ${fmt(a.part.projectedAreaM2, 2)} m²). Se necesitan ≈ ${fmt(tonnageForPressure(p.minPressureMPa, a.part), 0)} t.`);
+  if (p.pressTimeS < p.shortPressS)
+    add('warn', 'ptime', 'Prensado puro corto', `Con menos de ${p.shortPressS} s la piel no consolida bajo presión antes de colocar los pasadores.`);
 
   // Enfriamiento / batea
   const tgt = a.cooling.targetC;
   if (!isFinite(a.cooling.timeToTargetS)) {
     add('critical', 'cool', `El núcleo no alcanza ${tgt} °C`,
-      `Con ${p.ribThkMm} mm de espesor y agua a ${p.bathTempC} °C el núcleo no baja de ${tgt} °C en ${SEARCH_HORIZON_S / 60} min. Bajar la temperatura del agua, subir el objetivo o reducir el espesor.`);
+      `Con ${p.ribThkMm} mm de espesor y agua a ${p.bathTempC} °C el núcleo no baja de ${tgt} °C en ${p.searchHorizonMin} min. Bajar la temperatura del agua, subir el objetivo o reducir el espesor.`);
   } else if (p.dwellMode === 'fixed') {
     if (a.cooling.coreAtDwell > tgt) {
       add('critical', 'cool', 'Riesgo crítico de alabeo y deformación post-desmoldeo',
@@ -154,34 +159,34 @@ function buildAlerts(p: ProcessParams, a: AlertCtx): Alert[] {
     add('info', 'cool', 'Batea gobernada por temperatura',
       `El molde sale cuando el núcleo alcanza ${tgt} °C: ${fmt(reqMin)} min en batea.`);
   }
-  if (p.bathTempC > 30) add('warn', 'bath', 'Agua de batea caliente', 'Sobre 30 °C el gradiente térmico cae y el enfriamiento se alarga; revisar el chiller.');
-  if (a.process.warpMmPerM > 4) add('critical', 'warp', 'Alabeo previsto elevado', `≈ ${fmt(a.process.warpMmPerM)} mm/m por contracción diferencial núcleo-superficie.`);
-  else if (a.process.warpMmPerM > 2) add('warn', 'warp', 'Riesgo de alabeo', `≈ ${fmt(a.process.warpMmPerM)} mm/m; el asiento puede perder planitud.`);
-  if (a.process.sinkRisk > 0.5) add('warn', 'sink', 'Riesgo de rechupes', `Índice ${fmt(a.process.sinkRisk * 100, 0)} %: el núcleo contrae después de solidificar la piel.`);
+  if (p.bathTempC > p.bathWarnC) add('warn', 'bath', 'Agua de batea caliente', `Sobre ${p.bathWarnC} °C el gradiente térmico cae y el enfriamiento se alarga; revisar el chiller.`);
+  if (a.process.warpMmPerM > p.warpCritMmM) add('critical', 'warp', 'Alabeo previsto elevado', `≈ ${fmt(a.process.warpMmPerM)} mm/m por contracción diferencial núcleo-superficie.`);
+  else if (a.process.warpMmPerM > p.warpWarnMmM) add('warn', 'warp', 'Riesgo de alabeo', `≈ ${fmt(a.process.warpMmPerM)} mm/m; el asiento puede perder planitud.`);
+  if (a.process.sinkRisk * 100 > p.sinkWarnPct) add('warn', 'sink', 'Riesgo de rechupes', `Índice ${fmt(a.process.sinkRisk * 100, 0)} %: el núcleo contrae después de solidificar la piel.`);
 
   // Formulación
-  if (p.glassPct > 35) add('warn', 'fv-high', 'Fibra de vidrio excesiva', 'Sobre 35 % hay mojado deficiente, rotura de fibra y pérdida de resistencia/fluidez.');
-  else if (p.glassPct < 20) add('info', 'fv-low', 'Fibra de vidrio baja', 'Bajo 20 % la rigidez es limitada para clases D400/C250.');
-  if (p.carbonPct < 1.5) add('warn', 'cb-low', 'Protección UV insuficiente', 'Menos de 1,5 % de negro de humo incumple el objetivo de estabilización UV (ISO 17855 / ISO 7686).');
-  else if (p.carbonPct > 3) add('warn', 'cb-high', 'Exceso de negro de humo', 'Sobre 3 % se reduce la tenacidad y aumenta la viscosidad.');
-  if (p.meltTempC < 180) add('warn', 'melt-low', 'Masa fundida fría', 'Bajo 180 °C sube la viscosidad: más presión y riesgo de líneas de soldadura.');
-  else if (p.meltTempC > 210) add('critical', 'melt-high', 'Degradación térmica', 'Sobre 210 °C hay oxidación del PEAD y pérdida de propiedades.');
-  else if (p.meltTempC > 200) add('warn', 'melt-high', 'Masa fundida caliente', 'Sobre 200 °C el enfriamiento se alarga y aumenta el riesgo de rechupes.');
+  if (p.glassPct > p.glassMaxRec) add('warn', 'fv-high', 'Fibra de vidrio excesiva', `Sobre ${p.glassMaxRec} % hay mojado deficiente, rotura de fibra y pérdida de resistencia/fluidez.`);
+  else if (p.glassPct < p.glassMinRec) add('info', 'fv-low', 'Fibra de vidrio baja', `Bajo ${p.glassMinRec} % la rigidez es limitada para clases D400/C250.`);
+  if (p.carbonPct < p.carbonMin) add('warn', 'cb-low', 'Protección UV insuficiente', `Menos de ${p.carbonMin} % de negro de humo incumple el objetivo de estabilización UV (ISO 17855 / ISO 7686).`);
+  else if (p.carbonPct > p.carbonMax) add('warn', 'cb-high', 'Exceso de negro de humo', `Sobre ${p.carbonMax} % se reduce la tenacidad y aumenta la viscosidad.`);
+  if (p.meltTempC < p.meltMin) add('warn', 'melt-low', 'Masa fundida fría', `Bajo ${p.meltMin} °C sube la viscosidad: más presión y riesgo de líneas de soldadura.`);
+  else if (p.meltTempC > p.meltCritical) add('critical', 'melt-high', 'Degradación térmica', `Sobre ${p.meltCritical} °C hay oxidación del PEAD y pérdida de propiedades.`);
+  else if (p.meltTempC > p.meltMax) add('warn', 'melt-high', 'Masa fundida caliente', `Sobre ${p.meltMax} °C el enfriamiento se alarga y aumenta el riesgo de rechupes.`);
 
-  // EN 124
+  // Norma
   if (!a.mech.passDeflection)
-    add('critical', 'en-def', `UNE-EN 124 ${a.part.loadClass}: deformación permanente fuera de límite`,
-      `${fmt(a.mech.permanentDeflMm, 2)} mm tras ${fmt((2 / 3) * a.part.breakLoadKN, 1)} kN (máx. 2,0 mm).`);
+    add('critical', 'en-def', `UNE-EN 124 ${classLabel(a.part)}: deformación permanente fuera de límite`,
+      `${fmt(a.mech.permanentDeflMm, 2)} mm tras ${fmt((p.proofLoadPct / 100) * a.part.breakLoadKN, 1)} kN (máx. ${fmt(p.maxResidualMm, 1)} mm).`);
   if (!a.mech.passBreak)
-    add('critical', 'en-break', `UNE-EN 124 ${a.part.loadClass}: carga de rotura insuficiente`,
+    add('critical', 'en-break', `UNE-EN 124 ${classLabel(a.part)}: carga de rotura insuficiente`,
       `Rotura estimada ${fmt(a.mech.failureLoadKN, 0)} kN < ${a.part.breakLoadKN} kN exigidos.`);
-  if (a.mech.passBreak && a.mech.passDeflection && a.mech.safetyFactor < 1.15)
+  if (a.mech.passBreak && a.mech.passDeflection && a.mech.safetyFactor < p.safetyWarn)
     add('warn', 'en-margin', 'Margen de seguridad EN 124 reducido', `Coeficiente de seguridad ${fmt(a.mech.safetyFactor, 2)}; la dispersión de proceso puede dejar piezas fuera de norma.`);
 
   // Línea
-  if (a.des.util.crane > 0.85) add('warn', 'crane', 'Grúa saturada', `Utilización ${fmt(a.des.util.crane * 100, 0)} %: riesgo de esperas en prensa y batea.`);
+  if (a.des.util.crane * 100 > p.craneUtilWarnPct) add('warn', 'crane', 'Grúa saturada', `Utilización ${fmt(a.des.util.crane * 100, 0)} %: riesgo de esperas en prensa y batea.`);
   if (a.des.util.extruder > 0.95) add('warn', 'ext', 'Extrusor al límite', 'No hay holgura para absorber paradas del acumulador.');
-  if (a.des.util.pressBlocked > 0.08)
+  if (a.des.util.pressBlocked * 100 > p.pressBlockedWarnPct)
     add('warn', 'blocked', 'Prensa retenida', `La prensa pasa ${fmt(a.des.util.pressBlocked * 100, 0)} % del tiempo con un molde cerrado esperando grúa/posición libre en batea.`);
 
   const hasProblem = out.some((x) => x.severity === 'critical' || x.severity === 'warn');
