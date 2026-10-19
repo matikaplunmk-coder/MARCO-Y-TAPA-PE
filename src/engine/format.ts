@@ -49,3 +49,22 @@ export const STAGE_LABEL: Record<string, string> = {
   DEMOLD: 'Desenroscado y desmoldeo',
   RETURN: 'Retorno de molde vacío',
 };
+
+export const STAGE_LABEL_B: Record<string, string> = {
+  PREP_CAGE: 'Colocando inserto (jaula)',
+  PREP_BOLT: 'Ajustando pernos',
+  READY: 'Listo y apernado, en espera',
+  WAIT_OPERATOR: 'Esperando operario',
+  HOIST_IN: 'Polipasto → puesto',
+  WAIT_EXTRUDER: 'En puesto, esperando extrusor',
+  SWITCH: 'Conmutando válvula T',
+  FILLING: 'Llenando…',
+  HOLD: 'Mantenimiento / retracción de boquilla',
+  WAIT_HOIST_OUT: 'Esperando polipasto',
+  HOIST_OUT: 'Polipasto → batea',
+  COOL: 'Enfriando',
+  WAIT_HOIST_BENCH: 'Enfriado, esperando polipasto',
+  HOIST_BENCH: 'Polipasto → mesa de desmoldeo',
+  UNBOLT: 'Desapretando y abriendo',
+  EXTRACT: 'Desmoldeando',
+};

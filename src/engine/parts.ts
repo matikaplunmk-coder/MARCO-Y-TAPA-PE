@@ -83,7 +83,7 @@ export const DEFAULT_PARAMS: ProcessParams = {
   shrinkCrystPct: 2.4,
   shrinkDecay: 8,
 
-  extruderKgH: 240,
+  extruderKgH: 1200,
   overweightPct: 2.5,
 
   pressTon: 1000,
@@ -159,6 +159,7 @@ export const DEFAULT_PARAMS: ProcessParams = {
   warpDiffWeight: 0.6,
   warpResidualWeight: 0.25,
   warpScale: 1.8,
+  fiberDiamUm: 13,
 };
 
 export function presetName(id: PartId): string {

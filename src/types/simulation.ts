@@ -147,6 +147,7 @@ export interface ProcessParams {
   warpDiffWeight: number;
   warpResidualWeight: number;
   warpScale: number;
+  fiberDiamUm: number; // solo informativo: longitud de fibra = relación de aspecto × diámetro
 }
 
 export type Stage =
@@ -223,10 +224,10 @@ export interface DESResult {
 
 export type BottleneckId = 'Prensa' | 'Batea' | 'Flota de moldes' | 'Grúa' | 'Desmoldeo' | 'Extrusor';
 
-export interface Bottleneck {
-  id: BottleneckId;
+export interface Bottleneck<K extends string = BottleneckId> {
+  id: K;
   /** Capacidad teórica de cada recurso (piezas/h) */
-  capacities: Record<BottleneckId, number>;
+  capacities: Record<K, number>;
   explanation: string;
 }
 

@@ -63,55 +63,97 @@ export interface MechInputs {
   residualFactor: number;
 }
 
+/** Armadura de acero (jaula soldada) expresada por nervio */
+export interface CageSpec {
+  /** Área de acero traccionado por paso de nervadura (mm²) */
+  areaPerRibMm2: number;
+  coverMm: number;
+  EsMPa: number;
+  fyMPa: number;
+  /** Participación del compuesto en rigidez y resistencia (1 = compuesto íntegro) */
+  compositeShare: number;
+}
+
+export interface EN124Model {
+  at: (PkN: number) => { elasticMm: number; permanentMm: number; totalMm: number; stressRatio: number };
+  failureLoadKN: number;
+  result: MechanicalResult;
+}
+
 /**
  * Ensayo UNE-EN 124 simplificado: placa circular nervada, apoyo parcialmente empotrado en el asiento cónico,
  * carga repartida en almohadilla. La rigidez y la resistencia se reducen por el factor de huecos (rejillas).
+ * Admite una armadura de acero (sección transformada, rotura por fluencia del acero + aporte del compuesto).
  *  - Flecha residual tras la carga de ensayo (% de la rotura) ≤ límite admisible
  *  - Carga de rotura ≥ carga de la clase
  */
-export function evaluateEN124({ p, part, fillFactor, residualFactor }: MechInputs): MechanicalResult {
-  const { E } = compositeModulus(p);
+export function buildEN124Model(o: {
+  p: ProcessParams;
+  part: PartSpec;
+  E: number; // MPa, compuesto
+  sigmaU: number; // MPa, compuesto (ya con factores de llenado/residuales)
+  cage?: CageSpec;
+}): EN124Model {
+  const { p, part } = o;
   const nu = p.poisson;
-  const sigmaU = compositeStrength(p) * fillFactor * residualFactor;
+  const share = o.cage ? o.cage.compositeShare : 1;
+  const Ec = o.E * share;
+  const sigmaU = o.sigmaU * share;
   const sigmaY = p.yieldFrac * sigmaU;
   const solid = Math.max(0.05, 1 - part.voidFrac); // fracción de material efectiva
   const sec = sectionProps(part, p.ribThkMm);
-  const Ieff = sec.perWidth * p.gridFactor * solid; // mm⁴/mm
-  const tEq = Math.cbrt(12 * Ieff); // mm
-  const D = (E * Ieff) / (1 - nu * nu); // N·mm
+  const Irib = sec.I * p.gridFactor * solid; // mm⁴ por paso de nervadura
+  const dist = o.cage ? Math.max(1, sec.cTension - o.cage.coverMm) : 0;
+  const As = o.cage ? o.cage.areaPerRibMm2 : 0;
+  const Es = o.cage ? o.cage.EsMPa : 0;
+  const fy = o.cage ? o.cage.fyMPa : 0;
+  const EI = Ec * Irib + Es * As * dist * dist; // N·mm² por paso
   const a = part.openingMm / 2 + 25; // radio efectivo hasta el asiento (mm)
+  const D = EI / part.ribSpacingMm / (1 - nu * nu); // N·mm
+  const padR = Math.min(p.padRadiusMm, a * 0.9);
+  const Mdem = (P: number) => (P / (4 * Math.PI)) * ((1 + nu) * Math.log(a / padR) + 1) * part.ribSpacingMm * p.loadSpread; // N·mm por paso
   const deflection = (P: number) =>
     ((P * a * a) / (16 * Math.PI * D)) * ((3 + nu) / (1 + nu)) * p.supportClamp * p.padFactor;
 
-  const Pclass = part.breakLoadKN * 1000;
-  const Ptest = (p.proofLoadPct / 100) * Pclass; // N
-  const wEl = deflection(Ptest);
-
-  // Tensión máxima en la fibra traccionada: momento radial bajo la almohadilla (N·mm/mm),
-  // absorbido por el nervio de cada paso y repartido entre las dos direcciones de la malla.
-  const padR = Math.min(p.padRadiusMm, a * 0.9);
-  const stress = (P: number) => {
-    const M = (P / (4 * Math.PI)) * ((1 + nu) * Math.log(a / padR) + 1);
-    return (((M * part.ribSpacingMm * sec.cTension) / sec.I) / p.gridFactor / solid) * p.loadSpread;
+  const at = (PkN: number) => {
+    const P = PkN * 1000;
+    const kappa = Mdem(P) / EI;
+    const sc = Ec * kappa * sec.cTension;
+    const ss = Es * kappa * dist;
+    const ratio = Math.max(sc / sigmaY, o.cage ? ss / fy : 0);
+    const w = deflection(P);
+    const wp = w * (p.creepBase + p.creepGain * Math.pow(Math.min(ratio, 3), 3));
+    return { elasticMm: w, permanentMm: wp, totalMm: w + wp, stressRatio: ratio };
   };
-  const sTest = stress(Ptest);
-  const sClass = stress(Pclass);
-  const ratio = sTest / sigmaY;
-  const permanent = wEl * (p.creepBase + p.creepGain * Math.pow(Math.min(ratio, 3), 3));
-  const failureLoad = (Pclass * sigmaU) / sClass / 1000; // kN
 
-  return {
+  const Pclass = part.breakLoadKN;
+  const epsU = sigmaU / Ec;
+  const steelAtFailure = o.cage ? Math.min(fy, Es * epsU * (dist / sec.cTension)) : 0;
+  const Mcap = (sigmaU / sec.cTension) * Irib + steelAtFailure * As * dist;
+  const failureKN = (Pclass * Mcap) / Mdem(Pclass * 1000);
+  const test = at((p.proofLoadPct / 100) * Pclass);
+  const kClass = Mdem(Pclass * 1000) / EI;
+
+  const result: MechanicalResult = {
     glassVolFrac: volumeFraction(p),
-    modulusMPa: E,
-    tensileStrengthMPa: sigmaU,
+    modulusMPa: o.E,
+    tensileStrengthMPa: o.sigmaU,
     yieldStrengthMPa: sigmaY,
-    equivThicknessMm: tEq,
-    elasticDeflMm: wEl,
-    permanentDeflMm: permanent,
-    peakStressMPa: sClass,
-    failureLoadKN: failureLoad,
-    safetyFactor: failureLoad / part.breakLoadKN,
-    passDeflection: permanent <= p.maxResidualMm,
-    passBreak: failureLoad >= part.breakLoadKN,
+    equivThicknessMm: Math.cbrt((12 * EI) / Ec / part.ribSpacingMm),
+    elasticDeflMm: test.elasticMm,
+    permanentDeflMm: test.permanentMm,
+    peakStressMPa: Ec * kClass * sec.cTension,
+    failureLoadKN: failureKN,
+    safetyFactor: failureKN / Pclass,
+    passDeflection: test.permanentMm <= p.maxResidualMm,
+    passBreak: failureKN >= Pclass,
   };
+  return { at, failureLoadKN: failureKN, result };
+}
+
+/** Evaluación del Método A (compuesto puro) */
+export function evaluateEN124({ p, part, fillFactor, residualFactor }: MechInputs): MechanicalResult {
+  const { E } = compositeModulus(p);
+  const sigmaU = compositeStrength(p) * fillFactor * residualFactor;
+  return buildEN124Model({ p, part, E, sigmaU }).result;
 }

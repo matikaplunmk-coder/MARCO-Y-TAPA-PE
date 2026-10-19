@@ -4,8 +4,8 @@ export type NumKey = {
   [K in keyof ProcessParams]: ProcessParams[K] extends number ? K : never;
 }[keyof ProcessParams];
 
-export interface NumField {
-  key: NumKey;
+export interface NumField<P = ProcessParams, K extends string = NumKey> {
+  key: K;
   label: string;
   unit: string;
   /** Rango del slider (orientativo) */
@@ -18,14 +18,14 @@ export interface NumField {
   hint?: string;
   int?: boolean;
   advanced?: boolean;
-  visible?: (p: ProcessParams) => boolean;
-  disabled?: (p: ProcessParams) => boolean;
+  visible?: (p: P) => boolean;
+  disabled?: (p: P) => boolean;
 }
 
-export interface FieldGroup {
+export interface FieldGroup<P = ProcessParams, K extends string = NumKey> {
   id: string;
   title: string;
-  fields: NumField[];
+  fields: NumField<P, K>[];
 }
 
 type Opt = Partial<Pick<NumField, 'decimals' | 'hint' | 'int' | 'advanced' | 'visible' | 'disabled'>>;
@@ -85,6 +85,7 @@ export const FIELD_GROUPS: FieldGroup[] = [
       n('alphaMatrix', 'Expansión térmica del PEAD', '×10⁻⁶/K', 60, 250, 5, [1, 800], { advanced: true }),
       n('alphaFiber', 'Expansión térmica de la fibra', '×10⁻⁶/K', 1, 15, 0.5, [0, 100], { decimals: 1, advanced: true }),
       n('fiberAspect', 'Relación de aspecto de la fibra (l/d)', '', 5, 200, 1, [1, 2000], { advanced: true }),
+      n('fiberDiamUm', 'Diámetro del filamento (solo para mostrar la longitud l = l/d × d)', 'µm', 10, 20, 0.5, [1, 100], { decimals: 1, advanced: true }),
       n('poisson', 'Coeficiente de Poisson', '', 0.3, 0.45, 0.01, [0.05, 0.49], { decimals: 2, advanced: true }),
       n('sigmaMatrixMPa', 'Resistencia de la matriz sin refuerzo', 'MPa', 10, 50, 1, [1, 300], { advanced: true }),
       n('strengthPerGlass', 'Ganancia de resistencia por % de fibra', 'MPa/%', 0, 3, 0.1, [0, 20], { decimals: 1, advanced: true }),
@@ -98,7 +99,7 @@ export const FIELD_GROUPS: FieldGroup[] = [
     id: 'extruder',
     title: 'Extrusor y acumulador',
     fields: [
-      n('extruderKgH', 'Caudal de plastificación continuo', 'kg/h', 60, 2400, 10, [1, 20000], { hint: 'Determina el tiempo de llenado del acumulador' }),
+      n('extruderKgH', 'Caudal de plastificación continuo', 'kg/h', 60, 2500, 10, [1, 20000], { hint: 'Determina el tiempo de llenado del acumulador' }),
       n('overweightPct', 'Sobrepeso por rebaba / purga', '%', 0, 8, 0.1, [0, 50], { decimals: 1 }),
     ],
   },

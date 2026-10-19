@@ -109,12 +109,17 @@ export interface CoolingTimes {
  * El eje de tiempo comienza al iniciar el prensado. Se simula hasta el horizonte de búsqueda (searchHorizonMin) tras entrar en batea,
  * de modo que el tiempo para alcanzar la temperatura objetivo se obtiene de la propia curva.
  */
-export function simulateCooling(p: ProcessParams, times: CoolingTimes, targetC: number): CoolingCurve {
+export function simulateCooling(
+  p: ProcessParams,
+  times: CoolingTimes,
+  targetC: number,
+  filmOverride?: Partial<{ hPress: number; hAir: number; hBath: number }>,
+): CoolingCurve {
   const L = p.ribThkMm / 1000 / 2; // media espesor
   const dz = L / (NODES - 1);
   const rho = density(p);
   const k = conductivity(p);
-  const film = filmCoefficients(p);
+  const film = { ...filmCoefficients(p), ...filmOverride };
   const T = new Float64Array(NODES).fill(p.meltTempC);
 
   const tPressEnd = times.pressS;

@@ -1,31 +1,19 @@
-import {
-  Beaker,
-  ChevronDown,
-  Cog,
-  Download,
-  Droplets,
-  Factory,
-  Gauge,
-  Loader2,
-  RotateCcw,
-  ShieldAlert,
-  SlidersHorizontal,
-  Timer,
-  Upload,
-  Zap,
-} from 'lucide-react';
-import { useRef, useState, type ReactNode } from 'react';
+import { Beaker, Cog, Droplets, Factory, Gauge, ShieldAlert, Timer, Zap } from 'lucide-react';
+import type { ReactNode } from 'react';
 import type { Derived, LoadClass, ProcessParams } from '../types/simulation';
 import { FIELD_GROUPS, type NumField, type NumKey } from '../engine/paramSchema';
-import { CLASS_LOAD_KN, DEFAULT_PARAMS, PART_PRESETS } from '../engine/parts';
-import { exportPreset, importPreset } from '../engine/presets';
+import { CLASS_LOAD_KN, PART_PRESETS } from '../engine/parts';
 import NumberField from './NumberField';
+import { Accordion, Readout, Segmented } from './ui';
 
 interface Props {
   params: ProcessParams;
   onChange: (p: ProcessParams) => void;
   derived: Derived;
-  computing: boolean;
+  /** Grupos a mostrar (por id). Si se omite, todos. */
+  only?: string[];
+  /** Grupos a ocultar (por id). */
+  except?: string[];
 }
 
 const GROUP_ICON: Record<string, ReactNode> = {
@@ -42,80 +30,9 @@ const GROUP_ICON: Record<string, ReactNode> = {
 const GEOMETRY_KEYS: NumKey[] = ['massKg', 'projectedAreaM2', 'voidPct', 'ribThkMm', 'breakLoadKN', 'openingMm', 'plateThkMm', 'ribHeightMm', 'ribSpacingMm'];
 const DEFAULT_OPEN = new Set(['geometry', 'material', 'extruder', 'press', 'kinematics', 'bath']);
 
-function Accordion({
-  icon,
-  title,
-  badge,
-  defaultOpen = false,
-  nested = false,
-  children,
-}: {
-  icon?: ReactNode;
-  title: string;
-  badge?: string;
-  defaultOpen?: boolean;
-  nested?: boolean;
-  children: ReactNode;
-}) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <section className={nested ? 'rounded-lg border border-slate-800 bg-slate-950/40' : 'rounded-xl border border-slate-700 bg-slate-900'}>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        className={`flex w-full items-center gap-2 px-3 text-left font-semibold uppercase tracking-wide text-slate-400 hover:text-slate-200 ${
-          nested ? 'py-1.5 text-[10px]' : 'py-2.5 text-xs'
-        }`}
-      >
-        {icon}
-        <span className="flex-1">{title}</span>
-        {badge && <span className="rounded bg-slate-800 px-1.5 py-0.5 text-[10px] font-normal normal-case text-slate-400">{badge}</span>}
-        <ChevronDown size={14} className={`transition-transform ${open ? '' : '-rotate-90'}`} />
-      </button>
-      {open && <div className="space-y-3 px-3 pb-3">{children}</div>}
-    </section>
-  );
-}
-
-function Readout({ label, value, warn }: { label: string; value: string; warn?: boolean }) {
-  return (
-    <div className={`flex justify-between gap-2 rounded bg-slate-800 px-2 py-1 text-[11px] ${warn ? 'text-amber-300' : 'text-slate-300'}`}>
-      <span>{label}</span>
-      <span className="font-mono">{value}</span>
-    </div>
-  );
-}
-
-function Segmented<T extends string>({
-  value,
-  options,
-  onChange,
-}: {
-  value: T;
-  options: readonly (readonly [T, string])[];
-  onChange: (v: T) => void;
-}) {
-  return (
-    <div className="grid gap-1 rounded-lg bg-slate-800 p-1 text-[11px]" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
-      {options.map(([v, label]) => (
-        <button
-          key={v}
-          onClick={() => onChange(v)}
-          className={`rounded-md px-1.5 py-1.5 leading-tight transition ${value === v ? 'bg-sky-500 text-white' : 'text-slate-300 hover:bg-slate-700'}`}
-        >
-          {label}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 const mmss = (s: number) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, '0')}`;
 
-export default function ControlPanel({ params, onChange, derived, computing }: Props) {
-  const fileRef = useRef<HTMLInputElement>(null);
-  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-
+export default function ControlPanel({ params, onChange, derived, only, except }: Props) {
   const patch = (changes: Partial<ProcessParams>) => onChange({ ...params, ...changes });
   const setNum = (key: NumKey, v: number) => {
     const changes: Partial<ProcessParams> = { [key]: v };
@@ -124,34 +41,6 @@ export default function ControlPanel({ params, onChange, derived, computing }: P
       changes.loadClass = 'MANUAL'; // editar la carga a mano pasa a modo manual
     }
     patch(changes);
-  };
-
-  const doExport = () => {
-    const blob = new Blob([exportPreset(params)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `preset-planta-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-    setMsg({ ok: true, text: 'Preset exportado.' });
-  };
-
-  const doImport = async (file: File | undefined) => {
-    if (!file) return;
-    try {
-      const res = importPreset(await file.text());
-      onChange(res.params);
-      const extra = [
-        res.clamped.length ? `${res.clamped.length} ajustados a su rango` : '',
-        res.ignored.length ? `${res.ignored.length} ignorados` : '',
-        res.missing > 0 ? `${res.missing} no incluidos (valor de fábrica)` : '',
-      ].filter(Boolean);
-      setMsg({ ok: true, text: `Preset cargado: ${res.applied} valores${extra.length ? ' · ' + extra.join(' · ') : ''}.` });
-    } catch (e) {
-      setMsg({ ok: false, text: e instanceof Error ? e.message : 'No se pudo cargar el preset.' });
-    }
-    if (fileRef.current) fileRef.current.value = '';
   };
 
   const renderField = (f: NumField) => {
@@ -264,40 +153,7 @@ export default function ControlPanel({ params, onChange, derived, computing }: P
 
   return (
     <div className="space-y-3">
-      <Accordion icon={<SlidersHorizontal size={14} />} title="Acciones rápidas" defaultOpen>
-        <div className="grid grid-cols-1 gap-1.5">
-          <button
-            onClick={() => {
-              onChange(DEFAULT_PARAMS);
-              setMsg({ ok: true, text: 'Valores de fábrica restablecidos.' });
-            }}
-            className="flex items-center justify-center gap-2 rounded-lg border border-slate-600 bg-slate-800 py-2 text-xs text-slate-200 hover:bg-slate-700"
-          >
-            <RotateCcw size={14} /> Restablecer valores por defecto de fábrica
-          </button>
-          <div className="grid grid-cols-2 gap-1.5">
-            <button onClick={doExport} className="flex items-center justify-center gap-1.5 rounded-lg border border-slate-600 bg-slate-800 py-2 text-xs text-slate-200 hover:bg-slate-700">
-              <Download size={14} /> Exportar preset JSON
-            </button>
-            <button onClick={() => fileRef.current?.click()} className="flex items-center justify-center gap-1.5 rounded-lg border border-slate-600 bg-slate-800 py-2 text-xs text-slate-200 hover:bg-slate-700">
-              <Upload size={14} /> Cargar preset JSON
-            </button>
-          </div>
-          <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => doImport(e.target.files?.[0])} />
-          {msg && (
-            <div role="status" className={`rounded px-2 py-1 text-[11px] ${msg.ok ? 'bg-emerald-950/60 text-emerald-300' : 'bg-red-950/60 text-red-300'}`}>
-              {msg.text}
-            </div>
-          )}
-          {computing && (
-            <div className="flex items-center gap-1 text-[10px] text-sky-300">
-              <Loader2 size={12} className="animate-spin" /> recalculando…
-            </div>
-          )}
-        </div>
-      </Accordion>
-
-      {FIELD_GROUPS.map((g) => {
+      {FIELD_GROUPS.filter((g) => (!only || only.includes(g.id)) && !except?.includes(g.id)).map((g) => {
         const main = g.fields.filter((f) => !f.advanced);
         const adv = g.fields.filter((f) => f.advanced);
         const body = (

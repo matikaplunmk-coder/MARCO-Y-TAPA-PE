@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { NumField } from '../engine/paramSchema';
 
 interface Props {
-  field: NumField;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  field: NumField<any, string>;
   value: number;
   disabled?: boolean;
   onChange: (v: number) => void;

@@ -1,18 +1,19 @@
-import type { CoolingCurve, ProcessParams } from '../types/simulation';
+import type { CoolingCurve } from '../types/simulation';
 
 interface Props {
   cooling: CoolingCurve;
-  params: ProcessParams;
+  meltTempC: number;
+  coolantC: number;
 }
 
 /** Curva Temperatura vs. Tiempo (núcleo y superficie de la nervadura crítica) */
-export default function CoolingChart({ cooling, params }: Props) {
+export default function CoolingChart({ cooling, meltTempC, coolantC }: Props) {
   const W = 620;
   const H = 280;
   const m = { l: 44, r: 14, t: 14, b: 36 };
   const tMax = Math.max(cooling.tBathIn + cooling.dwellS * 1.25, cooling.tBathIn + (isFinite(cooling.timeToTargetS) ? cooling.timeToTargetS * 1.2 : 0), 1800);
   const T0 = 0;
-  const T1 = Math.ceil((params.meltTempC + 5) / 20) * 20;
+  const T1 = Math.ceil((meltTempC + 5) / 20) * 20;
   const x = (s: number) => m.l + (s / tMax) * (W - m.l - m.r);
   const y = (T: number) => H - m.b - ((T - T0) / (T1 - T0)) * (H - m.t - m.b);
   const path = (arr: number[]) => {
@@ -58,8 +59,8 @@ export default function CoolingChart({ cooling, params }: Props) {
       {/* umbral 50 °C y agua */}
       <line x1={m.l} x2={W - m.r} y1={y(tgt)} y2={y(tgt)} stroke="#22c55e" strokeDasharray="5 4" />
       <text x={m.l + 4} y={y(tgt) - 3} fontSize={9} fill="#4ade80">{tgt} °C (objetivo de extracción)</text>
-      <line x1={x(cooling.tBathIn)} x2={W - m.r} y1={y(params.bathTempC)} y2={y(params.bathTempC)} stroke="#38bdf8" strokeDasharray="2 3" opacity={0.7} />
-      <text x={W - m.r - 2} y={y(params.bathTempC) + 11} fontSize={9} fill="#7dd3fc" textAnchor="end">agua {params.bathTempC} °C</text>
+      <line x1={x(cooling.tBathIn)} x2={W - m.r} y1={y(coolantC)} y2={y(coolantC)} stroke="#38bdf8" strokeDasharray="2 3" opacity={0.7} />
+      <text x={W - m.r - 2} y={y(coolantC) + 11} fontSize={9} fill="#7dd3fc" textAnchor="end">agua {coolantC} °C</text>
 
       <path d={path(cooling.surface)} stroke="#f59e0b" strokeWidth={2} fill="none" />
       <path d={path(cooling.core)} stroke="#ef4444" strokeWidth={2.5} fill="none" />
